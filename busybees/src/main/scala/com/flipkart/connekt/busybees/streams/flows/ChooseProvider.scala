@@ -37,7 +37,7 @@ class ChooseProvider[T <: ProviderEnvelope](channel: Channel) extends MapFlowSta
       List(payload)
     } catch {
       case e: Throwable =>
-        ConnektLogger(LogFile.PROCESSORS).warn(s"ChooseProvider error", e)
+        ConnektLogger(LogFile.PROCESSORS).warn(s"ChooseProvider error failed for messageId : ${payload.messageId}", e)
         throw ConnektStageException(payload.messageId, payload.clientId, payload.destinations, InternalStatus.StageError, payload.appName, channel, payload.contextId, payload.meta, s"ChooseProvider-${e.getMessage}", e)
     }
   }

@@ -12,15 +12,17 @@
  */
 package com.flipkart.connekt.busybees.streams
 
-import akka.NotUsed
+import java.util.UUID
+
+import akka.{Done, NotUsed}
 import akka.event.Logging
 import akka.stream.scaladsl.{Flow, RunnableGraph, Sink, Source}
-import akka.stream.{ActorAttributes, Attributes, Materializer}
+import akka.stream.{ActorAttributes, Attributes, KillSwitches, Materializer}
 import com.flipkart.connekt.busybees.BusyBeesBoot
+import com.flipkart.connekt.commons.factories.{ConnektLogger, LogFile}
 import com.flipkart.connekt.commons.iomodels.{CallbackEvent, ConnektRequest}
 
-import scala.collection.mutable.ListBuffer
-import scala.concurrent.Promise
+import scala.concurrent.Future
 
 trait ConnektTopology[E <: CallbackEvent] {
 
@@ -38,19 +40,32 @@ trait ConnektTopology[E <: CallbackEvent] {
   val ioMat = BusyBeesBoot.ioMat
   val ioDispatcher = system.dispatchers.lookup("akka.actor.io-dispatcher")
 
-  val sourceSwitches: scala.collection.mutable.ListBuffer[Promise[String]] = ListBuffer()
+  private val killSwitch = KillSwitches.shared(UUID.randomUUID().toString)
+  private var shutdownComplete:Future[Done] = _
 
   def graphs(): List[RunnableGraph[NotUsed]] = {
     val sourcesMap = sources
     transformers.filterKeys(sourcesMap.contains).map { case (group, flow) =>
-      sourcesMap(group).withAttributes(ActorAttributes.dispatcher("akka.actor.default-pinned-dispatcher")).via(flow).to(sink)
+      sourcesMap(group).via(killSwitch.flow).withAttributes(ActorAttributes.dispatcher("akka.actor.default-pinned-dispatcher"))
+        .via(flow)
+        .watchTermination(){
+          case (materializedValue, completed) =>
+            shutdownComplete = completed
+            materializedValue
+        }
+        .to(sink)
         .withAttributes(Attributes.logLevels(onElement = Logging.InfoLevel, onFinish = Logging.InfoLevel, onFailure = Logging.ErrorLevel))
     }.toList
   }
 
-  def run(implicit mat: Materializer) = graphs().foreach(_.run())
+  def run(implicit mat: Materializer): Unit = graphs().foreach(_.run())
 
-  def shutdown()
+  def shutdown(): Future[Done] = {
+    ConnektLogger(LogFile.PROCESSORS).info(s"Shutting Down " + this.getClass.getSimpleName)
+    killSwitch.shutdown()
+    shutdownComplete.onSuccess{ case _ => ConnektLogger(LogFile.PROCESSORS).info(s"Shutdown Complete" + this.getClass.getSimpleName)}
+    Option(shutdownComplete).getOrElse(Future.successful(Done))
+  }
 
   def restart(implicit mat: Materializer): Unit = {
     shutdown()

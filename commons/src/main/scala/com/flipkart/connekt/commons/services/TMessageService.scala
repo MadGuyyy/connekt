@@ -20,7 +20,7 @@ import scala.util.Try
 
 trait TMessageService extends TService {
 
-  def saveRequest(request: ConnektRequest, requestBucket: String, isCrucial: Boolean = true): Try[String]
+  def saveRequest(request: ConnektRequest, requestBucket: String, persistPayloadInDataStore: Boolean = true): Try[String]
 
   def getRequestBucket(request: ConnektRequest, client: AppUser): String
 

@@ -18,7 +18,7 @@ import akka.http.scaladsl.model._
 import akka.http.scaladsl.model.headers.RawHeader
 import akka.stream.scaladsl.GraphDSL.Implicits._
 import akka.stream.scaladsl.{Flow, GraphDSL, MergePreferred, Sink}
-import akka.stream.{ActorMaterializer, SinkShape}
+import akka.stream.{ActorMaterializer, KillSwitch, SinkShape}
 import com.flipkart.connekt.commons.entities.{HTTPEventSink, Subscription, SubscriptionEvent}
 import com.flipkart.connekt.commons.factories.{ConnektLogger, LogFile}
 import com.flipkart.connekt.commons.metrics.Instrumented
@@ -26,16 +26,16 @@ import com.flipkart.connekt.commons.utils.StringUtils._
 import com.flipkart.connekt.firefly.dispatcher.HttpDispatcher
 
 import scala.collection._
-import scala.concurrent.{ExecutionContext, Promise}
+import scala.concurrent.ExecutionContext
 
-class HttpSink(subscription: Subscription, retryLimit: Int, topologyShutdownTrigger: Promise[String])(implicit am: ActorMaterializer, sys: ActorSystem, ec: ExecutionContext) extends Instrumented {
+class HttpSink(subscription: Subscription, retryLimit: Int, killSwitch: KillSwitch)(implicit am: ActorMaterializer, sys: ActorSystem, ec: ExecutionContext) extends Instrumented {
 
   val httpCachedClient = HttpDispatcher.httpFlow
 
   def getHttpSink: Sink[SubscriptionEvent, NotUsed] = {
 
     Sink.fromGraph(GraphDSL.create() { implicit b =>
-      val httpResponseHandler = b.add(new HttpResponseHandler(retryLimit, subscription.shutdownThreshold, subscription.id, topologyShutdownTrigger))
+      val httpResponseHandler = b.add(new HttpResponseHandler(retryLimit, subscription.shutdownThreshold, subscription.id, killSwitch))
       val event2HttpRequestMapper = b.add(Flow[SubscriptionEvent].map(httpPrepare))
       val httpRequestMergePref = b.add(MergePreferred[(HttpRequest, HttpRequestTracker)](1))
 

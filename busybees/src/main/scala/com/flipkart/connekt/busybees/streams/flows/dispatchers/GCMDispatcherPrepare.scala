@@ -21,10 +21,12 @@ import com.flipkart.connekt.commons.entities.MobilePlatform
 import com.flipkart.connekt.commons.factories.{ConnektLogger, LogFile}
 import com.flipkart.connekt.commons.iomodels.GCMPayloadEnvelope
 import com.flipkart.connekt.commons.iomodels.MessageStatus.InternalStatus
-import com.flipkart.connekt.commons.services.KeyChainManager
+import com.flipkart.connekt.commons.services.{ConnektConfig, KeyChainManager}
 import com.flipkart.connekt.commons.utils.StringUtils._
 
 class GCMDispatcherPrepare extends MapFlowStage[GCMPayloadEnvelope, (HttpRequest, GCMRequestTracker)] {
+
+  private val sendUri = Uri(ConnektConfig.getString("fcm.send.uri").getOrElse("https://fcm.googleapis.com/fcm/send"))
 
   override implicit val map: GCMPayloadEnvelope => List[(HttpRequest, GCMRequestTracker)] = message => {
     try {
@@ -33,7 +35,7 @@ class GCMDispatcherPrepare extends MapFlowStage[GCMPayloadEnvelope, (HttpRequest
 
       val requestEntity = HttpEntity(ContentTypes.`application/json`, message.gcmPayload.getJson)
       val requestHeaders = scala.collection.immutable.Seq[HttpHeader](RawHeader("Authorization", "key=" + KeyChainManager.getGoogleCredential(message.appName).get.apiKey))
-      val httpRequest = HttpRequest(HttpMethods.POST, "/fcm/send", requestHeaders, requestEntity)
+      val httpRequest = HttpRequest(HttpMethods.POST, sendUri, requestHeaders, requestEntity)
       val requestTrace = GCMRequestTracker(message.messageId, message.clientId, message.deviceId, message.appName, message.contextId, message.meta)
 
       List(httpRequest -> requestTrace)

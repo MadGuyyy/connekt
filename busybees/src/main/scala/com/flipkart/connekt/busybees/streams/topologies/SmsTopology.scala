@@ -31,6 +31,7 @@ import com.flipkart.connekt.commons.entities.Channel
 import com.flipkart.connekt.commons.factories.{ConnektLogger, LogFile, ServiceFactory}
 import com.flipkart.connekt.commons.iomodels._
 import com.flipkart.connekt.commons.services.ConnektConfig
+import com.flipkart.connekt.commons.streams.FirewallRequestTransformer
 import com.flipkart.connekt.commons.sync.SyncType.SyncType
 import com.flipkart.connekt.commons.sync.{SyncDelegate, SyncManager, SyncType}
 import com.flipkart.connekt.commons.utils.StringUtils._
@@ -50,10 +51,8 @@ class SmsTopology(kafkaConsumerConfig: Config) extends ConnektTopology[SmsCallba
     val merge = b.add(Merge[ConnektRequest](topics.size))
 
     for (portNum <- 0 until merge.n) {
-      val p = Promise[String]()
       val consumerGroup = s"${groupId}_$checkpointGroup"
-      new KafkaSource[ConnektRequest](kafkaConsumerConfig, topic = topics(portNum), consumerGroup)(p.future) ~> merge.in(portNum)
-      sourceSwitches += p
+      new KafkaSource[ConnektRequest](kafkaConsumerConfig, topic = topics(portNum), consumerGroup) ~> merge.in(portNum)
     }
 
     SourceShape(merge.out)
@@ -78,11 +77,6 @@ class SmsTopology(kafkaConsumerConfig: Config) extends ConnektTopology[SmsCallba
     SinkShape(metrics.in)
   })
 
-  override def shutdown() = {
-    /* terminate in top-down approach from all Source(s) */
-    sourceSwitches.foreach(_.success("SmsTopology signal source shutdown"))
-  }
-
   override def onUpdate(_type: SyncType, args: List[AnyRef]): Any = {
     _type match {
       case SyncType.CLIENT_QUEUE_CREATE => Try_ {
@@ -100,6 +94,8 @@ class SmsTopology(kafkaConsumerConfig: Config) extends ConnektTopology[SmsCallba
 
 object SmsTopology {
 
+  private val firewallStencilId: Option[String] = ConnektConfig.getString("sys.firewall.stencil.id")
+
   def smsTransformFlow(implicit ioMat:ActorMaterializer, ioDispatcher:  ExecutionContextExecutor): Flow[ConnektRequest, SmsCallbackEvent, NotUsed] = Flow.fromGraph(GraphDSL.create() { implicit b  =>
 
     /**
@@ -116,10 +112,11 @@ object SmsTopology {
     val tracking = b.add(new SMSTrackingFlow(trackSmsParallelism)(ioDispatcher).flow)
     val fmtSMSParallelism = ConnektConfig.getInt("topology.sms.formatter.parallelism").get
     val fmtSMS = b.add(new SmsChannelFormatter(fmtSMSParallelism)(ioDispatcher).flow)
-    val smsPayloadMerge = b.add(MergePreferred[SmsPayloadEnvelope](1))
+    val smsPayloadMerge = b.add(MergePreferred[SmsPayloadEnvelope](1, eagerComplete = true))
     val smsRetryMapper = b.add(Flow[SmsRequestTracker].map(_.request) /*.buffer(10, OverflowStrategy.backpressure)*/)
     val chooseProvider = b.add(new ChooseProvider[SmsPayloadEnvelope](Channel.SMS).flow)
     val smsPrepare = b.add(new SmsProviderPrepare().flow)
+    val firewallTransformer = b.add(new FirewallRequestTransformer[SmsRequestTracker](firewallStencilId).flow)
     val smsHttpPoolFlow = b.add(HttpDispatcher.smsPoolClientFlow.timedAs("smsRTT"))
 
     val providerHandlerParallelism = ConnektConfig.getInt("topology.sms.parse.parallelism").get
@@ -132,12 +129,11 @@ object SmsTopology {
     }))
 
     render.out ~> tracking ~> fmtSMS ~> smsPayloadMerge
-    smsPayloadMerge.out ~> chooseProvider ~> smsPrepare ~> smsHttpPoolFlow ~> smsResponseFormatter ~> smsResponseHandler ~> smsRetryPartition.in
+    smsPayloadMerge.out ~> chooseProvider ~> smsPrepare ~> firewallTransformer ~> smsHttpPoolFlow ~> smsResponseFormatter ~> smsResponseHandler ~> smsRetryPartition.in
     smsPayloadMerge.preferred <~ smsRetryMapper <~ smsRetryPartition.out(1).map(_.left.get).outlet
 
     FlowShape(render.in, smsRetryPartition.out(0).map(_.right.get).outlet)
   })
-
 
 
 }

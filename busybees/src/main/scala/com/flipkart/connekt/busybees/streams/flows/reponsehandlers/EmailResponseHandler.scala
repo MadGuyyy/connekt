@@ -60,9 +60,9 @@ class EmailResponseHandler(parallelism:Int)(implicit m: Materializer, ec: Execut
             ServiceFactory.getReportingService.recordChannelStatsDelta(clientId = requestTracker.clientId, contextId = Option(requestTracker.contextId), stencilId = requestTracker.meta.get("stencilId").map(_.toString), channel = Channel.EMAIL, appName = requestTracker.appName, event = EmailResponseStatus.InternalError)
             ConnektLogger(LogFile.PROCESSORS).error(s"EmailResponseHandler http response - the server encountered an error while trying to process the request for:  ${emailResponse.providerName}/${emailResponse.messageId}, code: ${emailResponse.responseCode}, response: ${emailResponse.message}, provider: ${requestTracker.provider}")
             Left((requestTracker.to ++ requestTracker.cc).map(t => EmailCallbackEvent(requestTracker.messageId, requestTracker.clientId, t, EmailResponseStatus.InternalError, requestTracker.appName, requestTracker.contextId, emailResponse.message)))
-          case w =>
+          case _ =>
             ServiceFactory.getReportingService.recordChannelStatsDelta(clientId = requestTracker.clientId, contextId = Option(requestTracker.contextId), stencilId = requestTracker.meta.get("stencilId").map(_.toString), channel = Channel.EMAIL, appName = requestTracker.appName, event = EmailResponseStatus.Error)
-            ConnektLogger(LogFile.PROCESSORS).error(s"OpenWebResponseHandler http response - response unhandled for: ${emailResponse.providerName}/${emailResponse.messageId},  code: ${emailResponse.responseCode}, response: ${emailResponse.message}, provider: ${requestTracker.provider}")
+            ConnektLogger(LogFile.PROCESSORS).error(s"EmailResponseHandler http response - response unhandled for: ${emailResponse.providerName}/${emailResponse.messageId},  code: ${emailResponse.responseCode}, response: ${emailResponse.message}, provider: ${requestTracker.provider}")
             Left((requestTracker.to ++ requestTracker.cc).map(t => EmailCallbackEvent(requestTracker.messageId, requestTracker.clientId, t, EmailResponseStatus.Error, requestTracker.appName, requestTracker.contextId, emailResponse.message)))
         }
 

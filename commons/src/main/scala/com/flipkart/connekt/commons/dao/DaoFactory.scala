@@ -43,7 +43,7 @@ object DaoFactory {
     daoMap += DaoType.EXCLUSION_DETAILS -> ExclusionDao("fk-connekt-exclusions", hTableFactory)
     daoMap += DaoType.PN_REQUEST_INFO -> PNRequestDao(tableName = "fk-connekt-pn-info", hTableFactory = hTableFactory)
     daoMap += DaoType.SMS_REQUEST_INFO -> SmsRequestDao(tableName = "fk-connekt-sms-info", hTableFactory = hTableFactory)
-    daoMap += DaoType.EMAIL_REQUEST_INFO -> new EmailRequestDao(tableName = "fk-connekt-email-info", hTableFactory = hTableFactory)
+    daoMap += DaoType.EMAIL_REQUEST_INFO -> new EmailRequestDao(tableName = "fk-connekt-email-info-v2", hTableFactory = hTableFactory)
     daoMap += DaoType.CALLBACK_PN -> PNCallbackDao("fk-connekt-events", hTableFactory)
     daoMap += DaoType.CALLBACK_EMAIL -> new EmailCallbackDao("fk-connekt-email-events", hTableFactory)
     daoMap += DaoType.CALLBACK_SMS -> new SmsCallbackDao("fk-connekt-sms-events", hTableFactory)

@@ -13,7 +13,7 @@
 package com.flipkart.connekt.firefly
 
 import akka.actor.ActorSystem
-import akka.stream.ActorMaterializer
+import akka.stream.{ActorMaterializer, KillSwitch}
 import com.flipkart.connekt.commons.entities.Subscription
 import com.flipkart.connekt.commons.factories.{ConnektLogger, LogFile}
 import com.flipkart.connekt.commons.services.SubscriptionService
@@ -22,23 +22,22 @@ import com.flipkart.connekt.commons.sync.{SyncDelegate, SyncManager, SyncType}
 import com.flipkart.connekt.commons.utils.StringUtils._
 import com.typesafe.config.Config
 
-import scala.concurrent.Promise
 import scala.util.{Failure, Success}
 
 class ClientTopologyManager(kafkaConsumerConnConf: Config, eventRelayRetryLimit: Int)(implicit am: ActorMaterializer, sys: ActorSystem) extends SyncDelegate {
 
   SyncManager.get().addObserver(this, List(SyncType.SUBSCRIPTION))
 
-  private val triggers = scala.collection.mutable.Map[String, Promise[String]]()
+  private val triggers = scala.collection.mutable.Map[String, KillSwitch]()
 
   private def isTopologyActive(id: String): Boolean = triggers.get(id).isDefined
 
-  private def getTrigger(id: String): Promise[String] = triggers(id)
+  private def getTrigger(id: String): KillSwitch = triggers(id)
 
   private def startTopology(subscription: Subscription): Unit = {
-    val promise = new ClientTopology(subscription.source, eventRelayRetryLimit, kafkaConsumerConnConf, subscription).start()
-    triggers += subscription.id -> promise
-    promise.future.onComplete( t =>  triggers -= subscription.id)(am.executionContext)
+    val (streamComplete, killSwitch) = new ClientTopology(subscription.source, eventRelayRetryLimit, kafkaConsumerConnConf, subscription).start()
+    triggers += subscription.id -> killSwitch
+    streamComplete.onComplete( _ =>  triggers -= subscription.id)(am.executionContext)
   }
 
   override def onUpdate(syncType: SyncType, args: List[AnyRef]): Any = {
@@ -52,8 +51,9 @@ class ClientTopologyManager(kafkaConsumerConnConf: Config, eventRelayRetryLimit:
             startTopology(subscription)
           case "stop" if isTopologyActive(subscription.id) =>
             ConnektLogger(LogFile.SERVICE).info(s"Stopping client topology ${subscription.id}")
-            getTrigger(subscription.id).success("User initiated topology shutdown")
-          case _ => ConnektLogger(LogFile.SERVICE).warn(s"Unhandled client topology state $action")
+            getTrigger(subscription.id).shutdown()
+          case _ =>
+            ConnektLogger(LogFile.SERVICE).warn(s"Unhandled client topology state $action")
         }
       case _ => ConnektLogger(LogFile.SERVICE).warn("Unwanted onUpdate type")
     }
@@ -68,10 +68,11 @@ class ClientTopologyManager(kafkaConsumerConnConf: Config, eventRelayRetryLimit:
 
   def stopAllTopologies() = {
     ConnektLogger(LogFile.SERVICE).info("Shutting down `firefly`")
-    triggers.keySet.foreach(s => {
-      triggers(s).success(s"Stopping client topology $s on firefly shutdown.")
-      ConnektLogger(LogFile.SERVICE).info(s"Stopping client topology $s on firefly shutdown")
-    })
+    triggers.foreach {
+      case (subscription, killSwitch) =>
+        ConnektLogger(LogFile.SERVICE).info(s"Stopping client topology $subscription on firefly shutdown")
+        killSwitch.shutdown()
+    }
   }
 }
 

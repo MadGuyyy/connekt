@@ -33,7 +33,7 @@ import scala.reflect.ClassTag
 import scala.util.Try
 import com.flipkart.connekt.commons.utils.CollectionUtils.iteratorUtils
 
-class KafkaSource[V: ClassTag](kafkaConsumerConf: Config, topic: String, groupId: String)(shutdownTrigger: Future[String])(implicit val ec: ExecutionContext) extends GraphStage[SourceShape[V]] with KafkaConnectionHelper with Instrumented {
+class KafkaSource[V: ClassTag](kafkaConsumerConf: Config, topic: String, groupId: String)(implicit val ec: ExecutionContext) extends GraphStage[SourceShape[V]] with KafkaConnectionHelper with Instrumented {
 
   val out: Outlet[V] = Outlet("KafkaMessageSource.Out")
 
@@ -91,24 +91,16 @@ class KafkaSource[V: ClassTag](kafkaConsumerConf: Config, topic: String, groupId
     })
 
     override def postStop(): Unit = {
-      val stopOffsets = offsets(topic, groupId, zkPath(kafkaConsumerConf))
-      ConnektLogger(LogFile.PROCESSORS).info(s"kafkaOffsets and owner on Stop for topic $topic are: ${stopOffsets.toString()}")
       kafkaConsumerConnector.shutdown()
+      val stopOffsets = offsets(topic, groupId, zkPath(kafkaConsumerConf))
+      ConnektLogger(LogFile.PROCESSORS).info(s"KafkaSource Shutdown:: kafkaOffsets and owner on Stop for topic $topic are: ${stopOffsets.toString()}")
       super.postStop()
     }
 
     override def preStart(): Unit = {
       initKafkaConsumer()
       val startOffset = offsets(topic, groupId, zkPath(kafkaConsumerConf))
-      ConnektLogger(LogFile.PROCESSORS).info(s"kafkaOffsets and owner on Start for topic $topic are: ${startOffset.toString()}")
-
-      val handle = getAsyncCallback[String] { (r: String) => completeStage()}
-
-      shutdownTrigger onComplete { t =>
-        ConnektLogger(LogFile.PROCESSORS).info(s"KafkaSource $topic async shutdown trigger invoked.")
-        handle.invoke(t.getOrElse("_external topology shutdown signal_"))
-      }
-
+      ConnektLogger(LogFile.PROCESSORS).info(s"KafkaSource PreStart:: kafkaOffsets and owner on Start for topic $topic are: ${startOffset.toString()}")
       super.preStart()
     }
   }

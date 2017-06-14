@@ -31,6 +31,7 @@ import com.flipkart.connekt.commons.entities.Channel
 import com.flipkart.connekt.commons.factories.{ConnektLogger, LogFile, ServiceFactory}
 import com.flipkart.connekt.commons.iomodels._
 import com.flipkart.connekt.commons.services.ConnektConfig
+import com.flipkart.connekt.commons.streams.FirewallRequestTransformer
 import com.flipkart.connekt.commons.sync.SyncType.SyncType
 import com.flipkart.connekt.commons.sync.{SyncDelegate, SyncManager, SyncType}
 import com.flipkart.connekt.commons.utils.StringUtils._
@@ -61,10 +62,8 @@ class EmailTopology(kafkaConsumerConfig: Config) extends ConnektTopology[EmailCa
     val merge = b.add(Merge[ConnektRequest](topics.size))
 
     for (portNum <- 0 until merge.n) {
-      val p = Promise[String]()
       val consumerGroup = s"${groupId}_$checkpointGroup"
-      new KafkaSource[ConnektRequest](kafkaConsumerConfig, topic = topics(portNum), consumerGroup)(p.future) ~> merge.in(portNum)
-      sourceSwitches += p
+      new KafkaSource[ConnektRequest](kafkaConsumerConfig, topic = topics(portNum), consumerGroup) ~> merge.in(portNum)
     }
 
     SourceShape(merge.out)
@@ -88,11 +87,6 @@ class EmailTopology(kafkaConsumerConfig: Config) extends ConnektTopology[EmailCa
     SinkShape(metrics.in)
   })
 
-  override def shutdown() = {
-    /* terminate in top-down approach from all Source(s) */
-    sourceSwitches.foreach(_.success("EmailTopology signal source shutdown"))
-  }
-
 
   override def transformers: Map[CheckPointGroup, Flow[ConnektRequest, EmailCallbackEvent, NotUsed]] = {
     Map(Channel.EMAIL.toString -> emailHTTPTransformFlow(ioMat, ec,ioDispatcher,blockingDispatcher))
@@ -101,6 +95,8 @@ class EmailTopology(kafkaConsumerConfig: Config) extends ConnektTopology[EmailCa
 
 object EmailTopology {
 
+  private val firewallStencilId: Option[String] = ConnektConfig.getString("sys.firewall.stencil.id")
+
   def emailHTTPTransformFlow(implicit ioMat:ActorMaterializer,defaultDispatcher:  ExecutionContextExecutor,  ioDispatcher:  ExecutionContextExecutor, blockingDispatcher:ExecutionContextExecutor): Flow[ConnektRequest, EmailCallbackEvent, NotUsed] = Flow.fromGraph(GraphDSL.create() { implicit b =>
 
     val render = b.add(new RenderFlow().flow)
@@ -108,11 +104,12 @@ object EmailTopology {
     val tracking = b.add(new EmailTrackingFlow(trackEmailParallelism)(blockingDispatcher).flow)
     val fmtEmailParallelism = ConnektConfig.getInt("topology.email.formatter.parallelism").get
     val fmtEmail = b.add(new EmailChannelFormatter(fmtEmailParallelism)(ioDispatcher).flow)
-    val emailPayloadMerge = b.add(MergePreferred[EmailPayloadEnvelope](1))
+    val emailPayloadMerge = b.add(MergePreferred[EmailPayloadEnvelope](1, eagerComplete = true))
     val emailRetryMapper = b.add(Flow[EmailRequestTracker].map(_.request) /*.buffer(10, OverflowStrategy.backpressure)*/)
     val providerPicker = b.add(new ChooseProvider[EmailPayloadEnvelope](Channel.EMAIL).flow)
     val providerHttpPrepareParallelism = ConnektConfig.getInt("topology.email.prepare.parallelism").get
     val providerHttpPrepare = b.add(new EmailProviderPrepare(providerHttpPrepareParallelism)(defaultDispatcher).flow)
+    val firewallTransformer = b.add(new FirewallRequestTransformer[EmailRequestTracker](firewallStencilId).flow)
     val emailPoolFlow = b.add(HttpDispatcher.emailPoolClientFlow.timedAs("emailRTT"))
 
     val providerHandlerParallelism = ConnektConfig.getInt("topology.email.parse.parallelism").get
@@ -125,7 +122,7 @@ object EmailTopology {
     }))
 
     render.out ~> tracking ~> fmtEmail ~> emailPayloadMerge
-    emailPayloadMerge.out ~> providerPicker ~> providerHttpPrepare ~> emailPoolFlow ~> providerResponseFormatter ~> emailResponseHandle ~> emailRetryPartition.in
+    emailPayloadMerge.out ~> providerPicker ~> providerHttpPrepare ~> firewallTransformer ~> emailPoolFlow ~> providerResponseFormatter ~> emailResponseHandle ~> emailRetryPartition.in
     emailPayloadMerge.preferred <~ emailRetryMapper <~ emailRetryPartition.out(1).map(_.left.get).outlet
 
     FlowShape(render.in, emailRetryPartition.out(0).map(_.right.get).outlet)

@@ -144,7 +144,7 @@ class CallbackRoute(implicit am: ActorMaterializer) extends BaseJsonHandler with
                           validEvents.persist
 
                           validEvents.foreach(event => {
-                            ServiceFactory.getReportingService.recordChannelStatsDelta(user.userId, Some(event.contextId), None, channel, event.appName, event.eventType)
+                            ServiceFactory.getReportingService.recordChannelStatsDelta(event.clientId, Some(event.contextId), None, channel, event.appName, event.eventType)
                           })
 
                           ConnektLogger(LogFile.SERVICE).debug(s"Received callback events ",supplier(validEvents.getJson))

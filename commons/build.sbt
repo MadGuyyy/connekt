@@ -52,7 +52,7 @@ libraryDependencies ++= Seq(
     ExclusionRule(organization = "org.slf4j"),
     ExclusionRule(organization = "asm")
   ),
-  "io.netty" % "netty-all" % "4.1.9.Final",
+  "io.netty" % "netty-all" % "4.1.11.Final",
   "org.apache.hbase" % "hbase-common" % "1.2.1" excludeAll(
     ExclusionRule("log4j"),
     ExclusionRule("io.netty"),

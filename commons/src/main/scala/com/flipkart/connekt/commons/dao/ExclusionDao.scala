@@ -12,6 +12,8 @@
  */
 package com.flipkart.connekt.commons.dao
 
+import java.util.concurrent.{TimeUnit, ScheduledThreadPoolExecutor}
+
 import com.flipkart.connekt.commons.core.Wrappers._
 import com.flipkart.connekt.commons.dao.HbaseDao.durationFunctions
 import com.flipkart.connekt.commons.entities.ExclusionType.ExclusionType
@@ -21,6 +23,7 @@ import com.flipkart.connekt.commons.metrics.Instrumented
 import com.flipkart.connekt.commons.utils.StringUtils._
 import com.flipkart.metrics.Timed
 import com.roundeights.hasher.Implicits.stringToHasher
+import org.apache.hadoop.hbase.client.BufferedMutator
 
 import scala.collection.mutable
 import scala.util.Try
@@ -29,6 +32,24 @@ class ExclusionDao(tableName: String, hTableFactory: THTableFactory) extends Dao
   private val hTableConnFactory = hTableFactory
   private val hTableName = tableName
   val hIndexTableName = tableName + "-index"
+
+  private implicit lazy val hTableMutator: BufferedMutator = hTableFactory.getBufferedMutator(hTableName)
+  private implicit lazy val hIndexTableMutator: BufferedMutator = hTableFactory.getBufferedMutator(hIndexTableName)
+
+  private val executor = new ScheduledThreadPoolExecutor(1)
+  private val flusher = executor.scheduleAtFixedRate(new Runnable {
+    override def run(): Unit = Try_ {
+      Option(hTableMutator).foreach(_.flush())
+      Option(hIndexTableMutator).foreach(_.flush())
+    }
+  }, 60, 60, TimeUnit.SECONDS)
+
+
+  override def close(): Unit = {
+    flusher.cancel(true)
+    Option(hTableMutator).foreach(_.close())
+    Option(hIndexTableMutator).foreach(_.close())
+  }
 
   private def getRowKeyIndexed(channel: String, appName: String, destination: String) = destination.sha256.hash.hex + "_" + channel + "_" + appName.toLowerCase
 
@@ -40,8 +61,6 @@ class ExclusionDao(tableName: String, hTableFactory: THTableFactory) extends Dao
 
   @Timed("add")
   def add(exclusionEntity: ExclusionEntity): Try[Unit] = Try_#(s"Adding ExclusionDao failed for ${exclusionEntity.destination}") {
-    implicit val hIndexTableInterface = hTableConnFactory.getTableInterface(hIndexTableName)
-    val hTableInterface = hTableConnFactory.getTableInterface(hTableName)
 
     val suppressionEntity = mutable.Map[String, Array[Byte]](
       "exclusionType" -> exclusionEntity.exclusionDetails.exclusionType.toString.getUtf8Bytes
@@ -49,7 +68,7 @@ class ExclusionDao(tableName: String, hTableFactory: THTableFactory) extends Dao
     val rawData = Map[String, Map[String, Array[Byte]]](columnFamily -> suppressionEntity.toMap)
     val indexedRowKey = getRowKeyIndexed(exclusionEntity.channel, exclusionEntity.appName, exclusionEntity.destination)
     val ttl = exclusionEntity.exclusionDetails.ttl.toTTL
-    addRow(indexedRowKey, rawData, ttl)
+    asyncAddRow(indexedRowKey, rawData, ttl)(hIndexTableMutator)
 
     // Adding exclusionType in rowKey.
     val rowKey = getRowKey(exclusionEntity.channel, exclusionEntity.appName, exclusionEntity.destination, exclusionEntity.exclusionDetails.exclusionType)
@@ -62,10 +81,8 @@ class ExclusionDao(tableName: String, hTableFactory: THTableFactory) extends Dao
     )
 
     val rD = Map[String, Map[String, Array[Byte]]](columnFamily -> suppressionEntityWithExType.toMap)
-    addRow(rowKey, rD, ttl)(hTableInterface)
+    asyncAddRow(rowKey, rD, ttl)(hTableMutator)
 
-    hTableConnFactory.releaseTableInterface(hIndexTableInterface)
-    hTableConnFactory.releaseTableInterface(hTableInterface)
     ConnektLogger(LogFile.DAO).info(s"Entry added for id ${exclusionEntity.destination} with exclusionType ${exclusionEntity.exclusionDetails.exclusionType}")
   }
 

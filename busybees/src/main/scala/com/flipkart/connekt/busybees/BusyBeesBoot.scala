@@ -27,7 +27,11 @@ import com.flipkart.connekt.commons.helpers.KafkaProducerHelper
 import com.flipkart.connekt.commons.services._
 import com.flipkart.connekt.commons.sync.SyncManager
 import com.flipkart.connekt.commons.utils.ConfigUtils
+import com.flipkart.connekt.commons.core.Wrappers._
 import com.typesafe.config.ConfigFactory
+
+import scala.concurrent.{Await, Future}
+import scala.concurrent.duration._
 
 object BusyBeesBoot extends BaseApp {
 
@@ -120,11 +124,10 @@ object BusyBeesBoot extends BaseApp {
   def terminate() = {
     ConnektLogger(LogFile.SERVICE).info("BusyBees shutting down")
     if (initialized.get()) {
+      implicit val ec = system.dispatcher
+      val shutdownFutures = Option(pushTopology).map( _.shutdown()) :: Option(smsTopology).map( _.shutdown()) :: Option(emailTopology).map( _.shutdown()) :: Nil
+      Try_#(message = "Topology Shutdown Didn't Complete")(Await.ready(Future.sequence(shutdownFutures.flatten), 20.seconds))
       DaoFactory.shutdownHTableDaoFactory()
-      Option(pushTopology).foreach(_.shutdown())
-      Option(smsTopology).foreach(_.shutdown())
-      Option(emailTopology).foreach(_.shutdown())
-
       ConnektLogger.shutdown()
     }
   }

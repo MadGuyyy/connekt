@@ -16,7 +16,7 @@ import akka.NotUsed
 import akka.stream._
 import akka.stream.scaladsl.GraphDSL.Implicits._
 import akka.stream.scaladsl._
-import com.flipkart.connekt.busybees.models.WNSRequestTracker
+import com.flipkart.connekt.busybees.models.{GCMRequestTracker, OpenWebRequestTracker, WNSRequestTracker}
 import com.flipkart.connekt.busybees.streams.ConnektTopology
 import com.flipkart.connekt.busybees.streams.flows.dispatchers._
 import com.flipkart.connekt.busybees.streams.flows.eventcreators.NotificationQueueRecorder
@@ -30,6 +30,7 @@ import com.flipkart.connekt.commons.entities.{Channel, MobilePlatform}
 import com.flipkart.connekt.commons.factories.{ConnektLogger, LogFile, ServiceFactory}
 import com.flipkart.connekt.commons.iomodels._
 import com.flipkart.connekt.commons.services.ConnektConfig
+import com.flipkart.connekt.commons.streams.FirewallRequestTransformer
 import com.flipkart.connekt.commons.sync.SyncType.SyncType
 import com.flipkart.connekt.commons.sync.{SyncDelegate, SyncManager, SyncType}
 import com.flipkart.connekt.commons.utils.StringUtils._
@@ -50,10 +51,8 @@ class PushTopology(kafkaConsumerConfig: Config) extends ConnektTopology[PNCallba
     val merge = b.add(Merge[ConnektRequest](topics.size))
 
     for (portNum <- 0 until merge.n) {
-      val p = Promise[String]()
       val consumerGroup = s"${groupId}_$checkpointGroup"
-      new KafkaSource[ConnektRequest](kafkaConsumerConfig, topic = topics(portNum), consumerGroup)(p.future) ~> merge.in(portNum)
-      sourceSwitches += p
+      new KafkaSource[ConnektRequest](kafkaConsumerConfig, topic = topics(portNum), consumerGroup) ~> merge.in(portNum)
     }
 
     SourceShape(merge.out)
@@ -67,6 +66,8 @@ class PushTopology(kafkaConsumerConfig: Config) extends ConnektTopology[PNCallba
       }
     }.toMap
   }
+
+  private val firewallStencilId: Option[String] = ConnektConfig.getString("sys.firewall.stencil.id")
 
   def androidTransformFlow = Flow.fromGraph(GraphDSL.create() { implicit b =>
 
@@ -84,10 +85,11 @@ class PushTopology(kafkaConsumerConfig: Config) extends ConnektTopology[PNCallba
     val notificationQueueRecorder = b.add(new NotificationQueueRecorder(notificationQueueParallelism)(ioDispatcher).flow)
     val fmtAndroid = b.add(new AndroidChannelFormatter(fmtAndroidParallelism)(ioDispatcher).flow)
     val gcmHttpPrepare = b.add(new GCMDispatcherPrepare().flow)
+    val firewallTransformer = b.add(new FirewallRequestTransformer[GCMRequestTracker](firewallStencilId).flow)
     val gcmPoolFlow = b.add(HttpDispatcher.gcmPoolClientFlow.timedAs("gcmRTT"))
     val gcmResponseHandle = b.add(new GCMResponseHandler()(ioMat, ioDispatcher).flow)
 
-    render.out ~> androidFilter ~> notificationQueueRecorder ~> fmtAndroid ~> gcmHttpPrepare ~> gcmPoolFlow ~> gcmResponseHandle
+    render.out ~> androidFilter ~> notificationQueueRecorder ~> fmtAndroid ~> gcmHttpPrepare ~> firewallTransformer ~> gcmPoolFlow ~> gcmResponseHandle
 
     FlowShape(render.in, gcmResponseHandle.out)
   })
@@ -131,6 +133,7 @@ class PushTopology(kafkaConsumerConfig: Config) extends ConnektTopology[PNCallba
     val render = b.add(new RenderFlow().flow)
     val windowsFilter = b.add(Flow[ConnektRequest].filter(m => MobilePlatform.WINDOWS.toString.equalsIgnoreCase(m.channelInfo.asInstanceOf[PNRequestInfo].platform.toLowerCase)))
     val wnsHttpPrepare = b.add(new WNSDispatcherPrepare().flow)
+    val firewallTransformer = b.add(new FirewallRequestTransformer[WNSRequestTracker](firewallStencilId).flow)
     val wnsPoolFlow = b.add(HttpDispatcher.wnsPoolClientFlow.timedAs("wnsRTT"))
 
     val wnsPayloadMerge = b.add(MergePreferred[WNSPayloadEnvelope](1))
@@ -150,7 +153,7 @@ class PushTopology(kafkaConsumerConfig: Config) extends ConnektTopology[PNCallba
     }))
 
     render.out ~> windowsFilter ~> notificationQueueRecorder ~>  fmtWindows ~>  wnsPayloadMerge
-    wnsPayloadMerge.out ~> wnsHttpPrepare  ~> wnsPoolFlow ~> wnsRHandler ~> wnsRetryPartition.in
+    wnsPayloadMerge.out ~> wnsHttpPrepare  ~> firewallTransformer ~> wnsPoolFlow ~> wnsRHandler ~> wnsRetryPartition.in
     wnsPayloadMerge.preferred <~ wnsRetryMapper <~ wnsRetryPartition.out(1).map(_.left.get).outlet
 
     FlowShape(render.in, wnsRetryPartition.out(0).map(_.right.get).outlet)
@@ -175,10 +178,11 @@ class PushTopology(kafkaConsumerConfig: Config) extends ConnektTopology[PNCallba
 
     //providers [standard]
     val openWebHttpPrepare = b.add(new OpenWebDispatcherPrepare().flow)
+    val firewallTransformer = b.add(new FirewallRequestTransformer[OpenWebRequestTracker](firewallStencilId).flow)
     val openWebPoolFlow = b.add(HttpDispatcher.openWebPoolClientFlow.timedAs("openWebRTT"))
     val openWebResponseHandle = b.add(new OpenWebResponseHandler()(ioMat, ioDispatcher).flow)
 
-    render.out ~> openWebFilter ~> notificationQueueRecorder ~> fmtOpenWeb ~> openWebHttpPrepare ~> openWebPoolFlow ~> openWebResponseHandle
+    render.out ~> openWebFilter ~> notificationQueueRecorder ~> fmtOpenWeb ~> openWebHttpPrepare ~> firewallTransformer ~> openWebPoolFlow ~> openWebResponseHandle
 
     FlowShape(render.in, openWebResponseHandle.out)
   })
@@ -198,11 +202,6 @@ class PushTopology(kafkaConsumerConfig: Config) extends ConnektTopology[PNCallba
 
     SinkShape(metrics.in)
   })
-
-  override def shutdown() = {
-    /* terminate in top-down approach from all Source(s) */
-    sourceSwitches.foreach(_.success("PushTopology signal source shutdown"))
-  }
 
   override def onUpdate(_type: SyncType, args: List[AnyRef]): Any = {
     _type match {

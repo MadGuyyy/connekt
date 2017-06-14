@@ -23,6 +23,7 @@ import com.flipkart.connekt.busybees.streams.flows.formaters.AndroidChannelForma
 import com.flipkart.connekt.busybees.streams.flows.reponsehandlers.GCMResponseHandler
 import com.flipkart.connekt.busybees.tests.streams.TopologyUTSpec
 import com.flipkart.connekt.commons.iomodels.{ConnektRequest, PNRequestInfo, Priority}
+import com.flipkart.connekt.commons.streams.FirewallRequestTransformer
 import com.flipkart.connekt.commons.utils.StringUtils._
 import org.apache.commons.lang.StringUtils
 
@@ -67,6 +68,7 @@ class AndroidTopologyTest extends TopologyUTSpec {
       .via(new RenderFlow().flow)
       .via(new AndroidChannelFormatter(64)(system.dispatchers.lookup("akka.actor.io-dispatcher")).flow)
       .via(new GCMDispatcherPrepare().flow)
+      .via(new FirewallRequestTransformer().flow)
       .via(poolClientFlow)
       .via(new GCMResponseHandler().flow)
       .runWith(Sink.head)

@@ -53,7 +53,7 @@ abstract class RequestDao(tableName: String, hTableFactory: THTableFactory) exte
 
   private def channelRequestModel(requestModel: ObjectNode) = Map[String, Array[Byte]]("model" -> requestModel.toString.getUtf8Bytes)
 
-  override def saveRequest(requestId: String, request: ConnektRequest) = {
+  override def saveRequest(requestId: String, request: ConnektRequest, persistDataProps: Boolean) = {
     try {
       var requestProps = Map[String, Array[Byte]](
         "id" -> requestId.getUtf8Bytes,
@@ -69,10 +69,15 @@ abstract class RequestDao(tableName: String, hTableFactory: THTableFactory) exte
       request.contextId.foreach(requestProps += "contextId" -> _.getBytes)
 
       val channelRequestInfoProps = channelRequestInfoMap(request.channelInfo)
-      val channelRequestDataProps = Option(request.channelData).map(channelRequestDataMap).getOrElse(Map[String, Array[Byte]]())
-      val channelRequestModelProps = Option(request.channelDataModel).map(channelRequestModel).getOrElse(Map[String, Array[Byte]]())
 
-      val rawData = Map[String, Map[String, Array[Byte]]]("r" -> requestProps, "c" -> channelRequestInfoProps, "t" -> (channelRequestDataProps ++ channelRequestModelProps))
+      val channelDataProps = if (persistDataProps) {
+        val channelRequestDataProps = Option(request.channelData).map(channelRequestDataMap).getOrElse(Map.empty[String, Array[Byte]])
+        val channelRequestModelProps = Option(request.channelDataModel).map(channelRequestModel).getOrElse(Map.empty[String, Array[Byte]])
+        channelRequestDataProps ++ channelRequestModelProps
+      } else
+        Map.empty[String, Array[Byte]]
+
+      val rawData = Map[String, Map[String, Array[Byte]]]("r" -> requestProps, "c" -> channelRequestInfoProps, "t" -> channelDataProps)
       asyncAddRow(requestId, rawData)
 
       ConnektLogger(LogFile.DAO).info(s"Request info persisted for $requestId")
@@ -87,9 +92,9 @@ abstract class RequestDao(tableName: String, hTableFactory: THTableFactory) exte
     implicit val hTableInterface = hTableConnFactory.getTableInterface(hTableName)
     try {
       val colFamiliesReqd = List("r", "c", "t")
-      val rawData:Map[String, RowData] = fetchMultiRows(connektIds, colFamiliesReqd)
+      val rawData: Map[String, RowData] = fetchMultiRows(connektIds, colFamiliesReqd)
 
-      rawData.flatMap{ case(rowKey:String,rowData:RowData )=>
+      rawData.flatMap { case (rowKey: String, rowData: RowData) =>
         val reqProps = rowData.get("r")
         val reqChannelInfoProps = rowData.get("c")
         val reqChannelDataProps = rowData.get("t")

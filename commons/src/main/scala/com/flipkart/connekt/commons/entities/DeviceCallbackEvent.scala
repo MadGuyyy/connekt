@@ -16,9 +16,20 @@ import com.flipkart.concord.publisher.TPublishRequest
 import com.flipkart.connekt.commons.iomodels.CallbackEvent
 import com.flipkart.connekt.commons.utils.DateTimeUtils
 
-sealed case class DeviceCallbackEvent(deviceId: String, userId: String, osName: String, osVersion: String,
-                                      appName: String, appVersion: String, brand: String, model: String,
-                                      state: String, ts: Long, active: Boolean) extends CallbackEvent {
+sealed case class DeviceCallbackEvent(deviceId: String,
+                                      userId: String,
+                                      osName: String,
+                                      osVersion: String,
+                                      appName: String,
+                                      appVersion: String,
+                                      brand: String,
+                                      model: String,
+                                      state: String,
+                                      ts: Long,
+                                      active: Boolean
+                                     ) extends CallbackEvent {
+
+  override def clientId: String = throw new RuntimeException(s"`clientId` undefined for DeviceCallbackEvent")
 
   override def contactId: String = throw new RuntimeException(s"`contactId` undefined for DeviceCallbackEvent")
 

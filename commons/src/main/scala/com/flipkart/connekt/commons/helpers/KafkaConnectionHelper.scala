@@ -18,13 +18,15 @@ import com.flipkart.connekt.commons.factories.{KafkaConsumerFactory, KafkaProduc
 import com.flipkart.connekt.commons.utils.StringUtils
 import com.typesafe.config.Config
 import kafka.consumer.{Consumer, ConsumerConfig}
-import kafka.producer.{ProducerConfig, Producer}
-import kafka.utils.{ZKGroupTopicDirs, ZkUtils, ZKStringSerializer}
+import kafka.producer.{Producer, ProducerConfig}
+import kafka.utils.{ZKGroupTopicDirs, ZKStringSerializer, ZkUtils}
 import org.I0Itec.zkclient.ZkClient
 import org.apache.commons.pool.impl.GenericObjectPool
 
 import scala.util.Try
 import StringUtils._
+
+import scala.collection.mutable
 
 trait KafkaConnectionHelper {
 
@@ -111,13 +113,15 @@ trait KafkaConnectionHelper {
     producerProps.setProperty("serializer.class", kafkaProducerConf.getString("serializer.class"))
     producerProps.setProperty("request.required.acks", kafkaProducerConf.getString("request.required.acks"))
     producerProps.setProperty("producer.type", Try(kafkaProducerConf.getString("producer.type")).getOrElse("sync"))
-    producerProps.setProperty("compression.codec", "2")
+    producerProps.setProperty("compression.codec", "1")
 
     new Producer[K, M](new ProducerConfig(producerProps))
   }
 
+  private val zkClients : mutable.HashMap[String,ZkClient] = mutable.HashMap[String,ZkClient]()
+
   def offsets(topic: String, groupId: String, zkPath: String): Map[Int, (Long, String)] = {
-    val zkClient = new ZkClient(zkPath, 5000, 5000, ZKStringSerializer)
+    val zkClient =  zkClients.getOrElseUpdate(zkPath,new ZkClient(zkPath, 5000, 5000, ZKStringSerializer))
     val partitions = ZkUtils.getPartitionsForTopics(zkClient, List(topic))
 
     partitions.flatMap(topicAndPart => {

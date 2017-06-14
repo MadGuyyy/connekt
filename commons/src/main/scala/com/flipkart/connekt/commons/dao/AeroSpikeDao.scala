@@ -26,11 +26,13 @@ import scala.concurrent.{Future, Promise}
 
 trait AeroSpikeDao  extends  Instrumented {
 
-  lazy val timeout: Int = ConnektConfig.getInt("connections.aerospike.timeout").getOrElse(500)
+  lazy val timeout: Int = ConnektConfig.getInt("connections.aerospike.timeout").getOrElse(1000)
+  lazy val maxRetries: Int = ConnektConfig.getInt("connections.aerospike.maxRetries").getOrElse(3)
 
   protected def addRow(key: Key, bin: Bin, ttl: Option[Long] = None)(implicit client: AsyncClient): Future[Boolean] = {
     val policy = new WritePolicy()
     policy.timeout = timeout
+    policy.maxRetries = maxRetries
     ttl.foreach(millis => policy.expiration = (millis / 1000).toInt)
     val promise = Promise[Boolean]()
     client.put(policy, new AeroSpikeWriteHandler(promise), key, bin)
@@ -40,6 +42,7 @@ trait AeroSpikeDao  extends  Instrumented {
   protected def addMapRow(key: Key, binName: String, values: Map[String, String], ttl: Option[Long] = None)(implicit client: AsyncClient): Future[Record] = {
     val policy = new WritePolicy()
     policy.timeout = timeout
+    policy.maxRetries = maxRetries
     ttl.foreach(millis => policy.expiration = (millis / 1000).toInt)
     val data: Map[Value, Value] = values.map { case (k, v) => (new StringValue(k), new StringValue(v)) }
     val promise = Promise[Record]()
@@ -50,6 +53,7 @@ trait AeroSpikeDao  extends  Instrumented {
   protected def deleteMapRowItems(key: Key, binName: String, keys: List[String])(implicit client: AsyncClient): Future[Record] = {
     val policy = new WritePolicy()
     policy.timeout = timeout
+    policy.maxRetries = maxRetries
     policy.expiration = -2
     val _keys: List[Value] = keys.map(new StringValue(_))
     val promise = Promise[Record]()
@@ -60,6 +64,7 @@ trait AeroSpikeDao  extends  Instrumented {
   protected def trimMapRowItems(key: Key, binName: String, numToRemove:Int)(implicit client: AsyncClient): Future[Record] = {
     val policy = new WritePolicy()
     policy.timeout = timeout
+    policy.maxRetries = maxRetries
     policy.expiration = -2
     val promise = Promise[Record]()
     client.operate(policy, new AeroSpikeRecordHandler(promise), key, MapOperation.removeByIndexRange(binName, 0, numToRemove, MapReturnType.COUNT))
@@ -69,6 +74,7 @@ trait AeroSpikeDao  extends  Instrumented {
   protected def getRow(key: Key)(implicit client: AsyncClient): Future[Record] = {
     val policy = new QueryPolicy()
     policy.timeout = timeout
+    policy.maxRetries = maxRetries
     val promise = Promise[Record]()
     client.get(policy, new AeroSpikeRecordHandler(promise), key)
     promise.future
@@ -77,6 +83,7 @@ trait AeroSpikeDao  extends  Instrumented {
   protected def deleteRow(key: Key)(implicit client: AsyncClient): Future[Boolean] = {
     val policy = new WritePolicy()
     policy.timeout = timeout
+    policy.maxRetries = maxRetries
     val promise = Promise[Boolean]()
     client.delete(policy, new AeroSpikeDeleteHandler(promise), key)
     promise.future

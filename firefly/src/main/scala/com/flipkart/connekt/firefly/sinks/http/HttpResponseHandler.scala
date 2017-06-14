@@ -25,17 +25,17 @@ import com.flipkart.metrics.Timed
 import scala.concurrent.{ExecutionContext, Promise}
 import scala.util.{Failure, Success, Try}
 
-class HttpResponseHandler(retryLimit: Int, shutdownThreshold: Int, subscriptionId: String, topologyShutdownTrigger: Promise[String])(implicit mat:ActorMaterializer,  ec: ExecutionContext)
+class HttpResponseHandler(retryLimit: Int, shutdownThreshold: Int, subscriptionId: String, killSwitch: KillSwitch)(implicit mat:ActorMaterializer,  ec: ExecutionContext)
   extends GraphStage[UniformFanOutShape[(Try[HttpResponse], HttpRequestTracker),(HttpRequest,HttpRequestTracker)]] with Instrumented {
 
-  lazy val deliveredMeter = meter("events.delivered")
-  lazy val discardedMeter = meter("events.discarded")
-  lazy val retriedMeter = meter("event.retry")
+  private val deliveredMeter = meter("events.delivered")
+  private val discardedMeter = meter("events.discarded")
+  private val retriedMeter = meter("event.retry")
 
-  val in = Inlet[(Try[HttpResponse], HttpRequestTracker)]("input")
-  val retryOnErrorOut = Outlet[(HttpRequest, HttpRequestTracker)]("retryOnError.out")
-  val successOut = Outlet[(HttpRequest, HttpRequestTracker)]("success.out")
-  val discardOut = Outlet[(HttpRequest, HttpRequestTracker)]("discard.out")
+  private val in = Inlet[(Try[HttpResponse], HttpRequestTracker)]("input")
+  private val retryOnErrorOut = Outlet[(HttpRequest, HttpRequestTracker)]("retryOnError.out")
+  private val successOut = Outlet[(HttpRequest, HttpRequestTracker)]("success.out")
+  private val discardOut = Outlet[(HttpRequest, HttpRequestTracker)]("discard.out")
 
   override def shape = new UniformFanOutShape(in, Array(retryOnErrorOut, successOut, discardOut))
 
@@ -80,10 +80,10 @@ class HttpResponseHandler(retryLimit: Int, shutdownThreshold: Int, subscriptionI
             }
         }
 
-        if(consecutiveSendFailures.get() > shutdownThreshold && !topologyShutdownTrigger.isCompleted) {
+        if(consecutiveSendFailures.get() > shutdownThreshold) {
           ConnektLogger(LogFile.SERVICE).info("Client callback topology shutdown trigger executed on threshold failures")
           meter(s"autoShutdown.$subscriptionId").mark()
-          topologyShutdownTrigger.complete(Success("Client callback topology shutdown trigger executed on threshold failures"))
+          killSwitch.shutdown()
         }
       }
     })

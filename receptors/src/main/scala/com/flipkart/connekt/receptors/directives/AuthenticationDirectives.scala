@@ -20,9 +20,10 @@ import akka.http.scaladsl.server._
 import akka.http.scaladsl.server.directives.{BasicDirectives, RouteDirectives}
 import com.flipkart.connekt.commons.entities.AppUser
 import com.flipkart.connekt.commons.factories.{ConnektLogger, LogFile}
+import com.flipkart.connekt.commons.metrics.Instrumented
 import com.flipkart.connekt.receptors.service.AuthenticationService
 
-trait AuthenticationDirectives extends HeaderDirectives {
+trait AuthenticationDirectives extends HeaderDirectives with Instrumented{
 
   case class TokenAuthenticationFailedRejection(message: String) extends Rejection
 
@@ -41,6 +42,7 @@ trait AuthenticationDirectives extends HeaderDirectives {
         case Some(apiKey) if apiKey.nonEmpty =>
           AuthenticationService.authenticateKey(apiKey) match {
             case Some(user) =>
+              meter(s"authenticate.${user.userId}").mark()
               provide(user)
             case None =>
               ConnektLogger(LogFile.SERVICE).warn(s"authentication failure for apiKey: [$apiKey]")

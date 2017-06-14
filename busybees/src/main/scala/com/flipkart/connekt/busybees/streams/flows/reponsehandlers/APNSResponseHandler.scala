@@ -23,8 +23,8 @@ import com.flipkart.connekt.commons.iomodels._
 import com.flipkart.connekt.commons.metrics.Instrumented
 import com.flipkart.connekt.commons.services.DeviceDetailsService
 import com.flipkart.connekt.commons.utils.StringUtils._
-import com.relayrides.pushy.apns.PushNotificationResponse
-import com.relayrides.pushy.apns.util.SimpleApnsPushNotification
+import com.turo.pushy.apns.PushNotificationResponse
+import com.turo.pushy.apns.util.SimpleApnsPushNotification
 
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.{ExecutionContext, Future}

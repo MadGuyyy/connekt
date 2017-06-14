@@ -120,7 +120,7 @@
 
     <Logger name="com.flipkart" level="INFO"/>
     <Logger name="com.flipkart.kloud.config" level="ERROR"/>
-    <Logger name="com.relayrides.pushy" level="INFO"/>
+    <Logger name="com.turo.pushy" level="INFO"/>
     <Logger name="net.htmlparser.jericho" level="FATAL"/>
 
 

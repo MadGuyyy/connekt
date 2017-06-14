@@ -12,17 +12,13 @@
  */
 package com.flipkart.connekt.busybees.tests.streams.topologies
 
-import akka.http.scaladsl.Http
+import java.util.UUID
+
+import akka.stream.KillSwitches
 import akka.stream.scaladsl.{Sink, Source}
-import com.flipkart.connekt.busybees.models.EmailRequestTracker
 import com.flipkart.connekt.busybees.streams.flows.dispatchers.HttpDispatcher
-import com.flipkart.connekt.busybees.streams.flows.formaters.EmailChannelFormatter
-import com.flipkart.connekt.busybees.streams.flows.reponsehandlers.EmailResponseHandler
-import com.flipkart.connekt.busybees.streams.flows.transformers.{EmailProviderPrepare, EmailProviderResponseFormatter}
-import com.flipkart.connekt.busybees.streams.flows.{ChooseProvider, EmailTrackingFlow, RenderFlow, TrackingFlow}
 import com.flipkart.connekt.busybees.streams.topologies.EmailTopology
 import com.flipkart.connekt.busybees.tests.streams.TopologyUTSpec
-import com.flipkart.connekt.commons.entities.Channel
 import com.flipkart.connekt.commons.iomodels.ConnektRequest
 import com.flipkart.connekt.commons.services.ConnektConfig
 import com.flipkart.connekt.commons.utils.StringUtils._
@@ -61,9 +57,13 @@ class EmailProviderTopologyTest extends TopologyUTSpec {
                       |}
                    """.stripMargin.getObj[ConnektRequest]
 
-    val result = Source.single(cRequest)
+    val killSwitch = KillSwitches.shared(UUID.randomUUID().toString)
+    val result = Source.tick(0.seconds, 5.seconds,cRequest).via(killSwitch.flow)
       .via(EmailTopology.emailHTTPTransformFlow(mat, ec, ec, ec))
-      .runWith(Sink.head)
+      .runWith(Sink.last)
+
+    Thread.sleep(7.seconds.toMillis)
+    killSwitch.shutdown()
 
     val response = Await.result(result, 120.seconds)
 

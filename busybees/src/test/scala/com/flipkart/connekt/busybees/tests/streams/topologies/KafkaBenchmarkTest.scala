@@ -36,7 +36,7 @@ class KafkaBenchmarkTest extends TopologyUTSpec with Instrumented {
 
   "KafkaBenchmarkTest" should "bench" in {
 
-    val kSource = Source.fromGraph(new KafkaSource[ConnektRequest](getKafkaConsumerConf, "email_8e494f43126ade96ce7320ad8ccfc709", "ckt_email")(Promise[String]().future))
+    val kSource = Source.fromGraph(new KafkaSource[ConnektRequest](getKafkaConsumerConf, "email_8e494f43126ade96ce7320ad8ccfc709", "ckt_email"))
     val qps = meter("kafa.read")
 
 
