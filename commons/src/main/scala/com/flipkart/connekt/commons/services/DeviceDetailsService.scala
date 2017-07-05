@@ -32,7 +32,8 @@ import scala.reflect.runtime.universe._
 import scala.util.{Failure, Success, Try}
 object DeviceDetailsService extends Instrumented {
 
-  lazy val dao = DaoFactory.getDeviceDetailsDao
+  private lazy val dao = DaoFactory.getDeviceDetailsDao
+  private lazy val CALLBACK_QUEUE_NAME = ConnektConfig.get("firefly.kafka.topic").getOrElse("ckt_callback_events")
 
   def bootstrap() = dao.get("ConnectSampleApp", StringUtils.generateRandomStr(15))
 
@@ -42,7 +43,7 @@ object DeviceDetailsService extends Instrumented {
     DistributedCacheManager.getCache(DistributedCacheType.DeviceDetails).put[DeviceDetails](cacheKey(deviceDetails.appName, deviceDetails.deviceId), deviceDetails)
     if (deviceDetails.userId != null)
       DistributedCacheManager.getCache(DistributedCacheType.DeviceDetails).remove(cacheKey(deviceDetails.appName, deviceDetails.userId))
-    ServiceFactory.getCallbackService.enqueueCallbackEvents(List(deviceDetails.toCallbackEvent)).get
+    ServiceFactory.getCallbackService.enqueueCallbackEvents(List(deviceDetails.toCallbackEvent),CALLBACK_QUEUE_NAME).get
     BigfootService.ingestEntity(deviceDetails.deviceId, deviceDetails.toPublishFormat, deviceDetails.namespace).get
   }
 
@@ -63,7 +64,7 @@ object DeviceDetailsService extends Instrumented {
           DistributedCacheManager.getCache(DistributedCacheType.DeviceDetails).remove(cacheKey(device.appName, device.token))
           if (deviceDetails.userId != null)
             DistributedCacheManager.getCache(DistributedCacheType.DeviceDetails).remove(cacheKey(deviceDetails.appName, deviceDetails.userId))
-          ServiceFactory.getCallbackService.enqueueCallbackEvents(List(deviceDetails.toCallbackEvent)).get
+          ServiceFactory.getCallbackService.enqueueCallbackEvents(List(deviceDetails.toCallbackEvent),CALLBACK_QUEUE_NAME).get
           BigfootService.ingestEntity(deviceId, deviceDetails.toPublishFormat, deviceDetails.namespace).get
         }
       case None =>
@@ -90,7 +91,7 @@ object DeviceDetailsService extends Instrumented {
             DistributedCacheManager.getCache(DistributedCacheType.DeviceDetails).remove(cacheKey(device.appName, device.userId))
           DistributedCacheManager.getCache(DistributedCacheType.DeviceDetails).remove(cacheKey(device.appName, device.token))
           DistributedCacheManager.getCache(DistributedCacheType.DeviceDetails).remove(cacheKey(device.appName, device.deviceId))
-          ServiceFactory.getCallbackService.enqueueCallbackEvents(List(device.copy(active = false).toCallbackEvent)).get
+          ServiceFactory.getCallbackService.enqueueCallbackEvents(List(device.copy(active = false).toCallbackEvent), CALLBACK_QUEUE_NAME).get
           BigfootService.ingestEntity(deviceId, device.copy(active = false).toPublishFormat, device.namespace)
         }
       case None =>

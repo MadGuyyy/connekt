@@ -49,15 +49,15 @@ class CallbackService(eventsDao: EventsDaoContainer, requestDao: RequestDaoConta
   override def persistCallbackEvents(channel: Channel.Value, events: List[CallbackEvent]): Try[List[String]] = {
     Try {
       val rowKeys = eventsDao(channel).asyncSaveCallbackEvents(events)
-      enqueueCallbackEvents(events).get
+      enqueueCallbackEvents(events, CALLBACK_QUEUE_NAME).get
       ConnektLogger(LogFile.SERVICE).debug(s"Event saved with rowKeys $rowKeys")
       rowKeys
     }
   }
 
   @Timed("enqueueCallbackEvent")
-  def enqueueCallbackEvents(events: List[CallbackEvent]): Try[Unit] = Try_ {
-    queueProducerHelper.writeMessages(CALLBACK_QUEUE_NAME, events.map(_.getJson): _*)
+  override def enqueueCallbackEvents(events: List[CallbackEvent], queueName:String): Try[Unit] = Try_ {
+    queueProducerHelper.writeMessages(queueName, events.map(_.getJson): _*)
   }
 
   @Timed("fetchCallbackEvent")
